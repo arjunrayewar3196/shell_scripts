@@ -1,0 +1,531 @@
+
+1.Clean-up script for Jenkins
+
+#!/bin/bash
+file_name_war=Removed_files.war
+file_name_jar=Removed_files.jar
+current_time=$(date "+%Y.%m.%d-%H.%M.%S")
+df -h 
+df_before=`df -h  | grep "/var" | awk '{print $4}'| sed "s/%//"`
+CAPACITY=85
+TIME=180
+CLEANUP_DIR=/var/lib/jenkins/jobs/
+REMOVED_FLS_DIR=/home/Cleanup_activities/
+if [ $(df -h  | grep "/var" | awk '{print $4}'| sed "s/%//") -gt $CAPACITY ]
+then
+	mkdir -p $REMOVED_FLS_DIR
+	touch $REMOVED_FLS_DIR$file_name_war.$current_time
+    touch $REMOVED_FLS_DIR$file_name_jar.$current_time
+    find "$CLEANUP_DIR" -name '*.war' -type f -mtime +"$TIME" -ls > $REMOVED_FLS_DIR$file_name_war.$current_time
+	find "$CLEANUP_DIR" -name '*.war' -type f -mtime +"$TIME" | xargs rm -rf 
+	find "$CLEANUP_DIR" -name '*.jar' -type f -mtime +"$TIME" -ls > $REMOVED_FLS_DIR$file_name_jar.$current_time
+	find "$CLEANUP_DIR" -name '*.jar' -type f -mtime +"$TIME" | xargs rm -rf
+fi 
+df_after=`df -h  | grep "/var" | awk '{print $4}'| sed "s/%//"`(file system availbale space after the activity)
+echo " Available space before cleanup "$df_before" "
+echo " Available space after cleanup "$df_after" "
+echo " Please check this `$REMOVED_FLS_DIR` directory for deleted files list. "
+change the global config. to qlgithub
+ask uers to run the jobs and get update
+
+crontab –e
+* 24 * * * /PATH/
+	
+###################################################################################################
+
+2.Script to find out jenkins jobs and build status and no of builds
+
+#!/bin/bash
+if [ ! -f builds ]
+then
+    touch builds
+fi
+if [ ! -f Jenkins_build_data.txt ]
+then
+    touch Jenkins_build_data.txt
+fi
+echo -e "Jenkins Projects vs  No of Builds\n" > Jenkins_build_data.txt
+if [ ! -f allprojects ]
+then
+    touch allprojects
+fi
+ls /var/Restore1>allprojects
+start=`date --date="120 day ago" +%s%3N`
+end=`date +%s%3N`
+project=$(cat allprojects)
+for each in $project
+do
+    current_project=`basename $each`
+    find /var/Restore1/$current_project -maxdepth 20 -name build.xml >builds
+    FILENAME="builds"
+    LINES=$(cat $FILENAME)
+    declare -i i=0
+    for build_xml in $LINES
+    do
+            startTime=$(sed -n -e "s/.*<startTime>\(.*\)<\/startTime>.*/\1/p" $build_xml)
+            if [[ $startTime > $start ]] && [[ $startTime < $end ]]
+            then
+                    i+=1
+            fi
+    done
+    echo "Project Name : $current_project      --------        No of Builds: "$i"" >>Jenkins_build_data.txt
+done
+echo "Hi , Please check the built data between `date --date="120 day ago"` and  `date`" | mail -s "Builds data" sunilkumar.gunti@cscglobal.com;prasadarao.yennigalla@cscglobal.com,suryamanikanta.kusumuru@cscglobal.com,ramanand.yeleswarapu@cscglobal.com -A Jenkins_build_data.txt
+echo " Succesfully fetched builds data from `date --date="120 day ago"` to `date` and mailed to  Sunil , Prasad and Surya "
+
+crontab –e
+0 0 * * 6 /PATH of shell-script
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+
+###################################################################################################
+3.Script to disable self timer jobs in jenkins
+
+1st approach
+#!/bin/bash
+
+# Get a list of all jobs in Jenkins
+jobs=$(curl -s "http://jenkins_url/api/json?tree=jobs[name,url]")
+
+# Loop through each job and check if it has a self-timer trigger
+for job in $(echo $jobs | jq -r '.jobs[].name'); do
+    triggers=$(curl -s "http://jenkins_url/job/$job/config.xml" | grep -o "hudson.triggers.TimerTrigger")
+    if [ -n "$triggers" ]; then
+        # Disable the self-timer trigger for the job
+        curl -X POST -H "Content-Type: text/xml" --data "<project><disabled>true</disabled></project>" "http://jenkins_url/job/$job/disable"
+    fi
+done
+
+2nd approach
+# Search for jobs that contain the string "self timer" in their config.xml file
+#!/bin/bash
+find /var/lib/jenkins/jobs -name config.xml -exec grep -l 'triggers.TimerTrigger' {} + >file_list
+for file in $(cat $file_list); do
+    sed -i 's/<disabled>false<\/disabled>/<disabled>true<\/disabled>/g' $file
+done
+
+###################################################################################################
+4.script to download java package into jenkins from artifactory
+
+#!/bin/bash -ue
+version=8.33.0.1
+jdkUrl=https://artifactory2.cscinfo.com/artifactory/zulu-jdk/zulu8.33.0.1-ca-jdk8.0.192-linux_x64.tar.gz
+jdkArchive=$(basename $jdkUrl)
+jdkName="${jdkArchive%.tar.gz}"
+jdkDir="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+thisJdkDir=${jdkDir}/${jdkName}
+
+if ! type wget >/dev/null 2>&1; then
+    echo "ERROR: Unable to run wget"
+    exit 1
+fi
+
+if [ -x $thisJdkDir/bin/java ]; then
+    JAVA_HOME="$thisJdkDir"
+    if $JAVA_HOME/bin/java -version 2>&1 | grep -q "$version"; then
+        exit 0
+    fi
+fi
+
+echo "Installing Zulu ${version} in ${thisJdkDir}"
+rm -rf $thisJdkDir
+wget --no-verbose --referer=http://www.azulsystems.com/products/zulu/downloads $jdkUrl -O ${jdkArchive}
+tar -xf ${jdkArchive}
+rm -f ${jdkArchive}
+echo "Zulu ${version} installed in ${thisJdkDir}"
+exit 0
+
+###################################################################################################
+5.script to retrieve credentials from old jenkins server and create those in new jenkins server
+
+
+#!/bin/bash
+DIRECTORY="/var/lib/jenkins/jobs"
+OUTPUT_FILE="output.txt"
+PATTERN="<\(id\|description\|username\|password\)>([^<]*)</\1>"
+for job_dir in "$DIRECTORY"/*/; do
+    if [[ -f "$job_dir/config.xml" ]]; then
+    
+		grep -Po "$PATTERN" "$job_dir/config.xml" | sed 's/.*>\(.*\)<.*/\1/' >> "$OUTPUT_FILE"
+		
+    fi
+done
+
+###################################################################################################
+6.Shell script to remove all unused and dangling images 
+
+#!bin/bash
+# Remove all the dangling images
+DANGLING_IMAGES=$(docker images -qf "dangling=true")
+if [[ -n $DANGLING_IMAGES ]]; then
+    docker rmi "$DANGLING_IMAGES"
+fi
+
+# Get all the images currently in use
+USED_IMAGES=($( \
+    docker ps -a --format '{{.Image}}' | \
+    sort -u | \
+    uniq | \
+    awk -F ':' '$2{print $1":"$2}!$2{print $1":latest"}' \
+))
+
+# Get all the images currently available
+ALL_IMAGES=($( \
+    docker images --format '{{.Repository}}:{{.Tag}}' | \
+    sort -u \
+))
+
+# Remove the unused images
+for i in "${ALL_IMAGES[@]}"; do
+    UNUSED=true
+    for j in "${USED_IMAGES[@]}"; do
+        if [[ "$i" == "$j" ]]; then
+            UNUSED=false
+        fi
+    done
+    if [[ "$UNUSED" == true ]]; then
+        echo "$i"
+        docker rmi "$i"
+       
+    fi
+done
+
+#The below command works for the Higher version of Docker
+#docker image prune -a --force --filter "until=720h"
+
+###################################################################################################
+7.Script to clear maven local repository disk space
+sunday every week at 12.03 am
+#!/bin/bash
+df -kh 
+echo "====="
+cd /dockershare/.m2/repository
+echo "====="
+echo $PWD
+echo "====="
+find . -name "PR-*"| xargs rm -rf
+
+df_before=`df -h  | grep "/dockershare" | awk '{print $4}'`
+echo " Available space before cleanup "$df_before" "
+
+cd /dockershare/.m2/repository/com/cscinfo
+echo $PWD
+echo "====="
+find . -mtime +60 -iname "*SNAPSHOT"| xargs rm -rf
+find . -name '*.war' -type f -mtime +60 | xargs rm -rf
+df_after=`df -h  | grep "/dockershare" | awk '{print $4}'`
+echo " Available space after cleanup "$df_after" "
+
+
+###################################################################################################
+Cleanup script for github enterprise servers
+
+8.#!/bin/bash
+
+# Set the path to your repository
+REPO_PATH=/path/to/your/repo
+
+# Set the number of days of files to keep
+DAYS_TO_KEEP=30
+
+# Go to the repository directory
+cd $REPO_PATH
+
+# Remove files that are older than $DAYS_TO_KEEP
+find . -type f -mtime +$DAYS_TO_KEEP -delete
+
+# Remove empty directories
+find . -type d -empty -delete
+
+This script will find and remove all files in your repository that are older than the 
+specified number of days to keep. It will also remove any empty directories.
+
+###################################################################################################
+9
+
+Assuming our credentials.txt looks like this 
+		description: Vault admin
+        id: vault-admin
+        username: admin
+        password: 9cy7Mbw@1Omm7db@q6eP3k62Wm*ev#
+        scope: GLOBAL 
+		
+		description: Vault admin
+        id: vault-admin
+        username: admin
+        password: 9cy7Mbw@1Omm7db@q6eP3k62Wm*ev#
+        scope: GLOBAL 
+		
+import jenkins.model.*
+import com.cloudbees.plugins.credentials.*
+import com.cloudbees.plugins.credentials.impl.*
+import com.cloudbees.plugins.credentials.domains.*
+
+def credsFile = new File('/path/to/credentials.txt')
+
+def domain = Domain.global()
+def store = Jenkins.instance.getExtensionList('com.cloudbees.plugins.credentials.SystemCredentialsProvider')[0].getStore()
+
+def credSets = credsFile.readLines().split("\n\n")
+
+credSets.each { credSet ->
+    def credMap = [:]
+    credSet.eachLine { line ->
+        def parts = line.split(':')
+        def key = parts[0].trim()
+        def value = parts[1].trim()
+        credMap.put(key, value)
+    }
+
+    def id = credMap.get('id')
+    def description = credMap.get('description')
+    def username = credMap.get('username')
+    def password = credMap.get('password')
+
+    def creds = new UsernamePasswordCredentialsImpl(CredentialsScope.GLOBAL, id, description, username, password)
+    store.addCredentials(domain, creds)
+}
+
+println "Credentials created from file."
+
+
+This script first reads in the credentials file and splits it into sets of credentials using the 
+\n\n separator. Each set is then processed separately. The script uses a map to store the key-value
+ pairs for each set of credentials, and then extracts the id, description, username, and password 
+ values from the map. Finally, it creates a new UsernamePasswordCredentialsImpl object with those 
+ values and adds the new credentials to the global store.
+ 
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Global cred
+import java.nio.charset.StandardCharsets;
+def creds = com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
+      com.cloudbees.plugins.credentials.Credentials.class
+)
+
+for (c in creds) {
+  println(c.id)
+  if (c.properties.description) {
+    println("   description: " + c.description)
+  }
+  if (c.properties.username) {
+    println("   username: " + c.username)
+  }
+  if (c.properties.password) {
+    println("   password: " + c.password)
+  }
+  if (c.properties.passphrase) {
+    println("   passphrase: " + c.passphrase)
+  }
+  if (c.properties.secret) {
+    println("   secret: " + c.secret)
+  }
+  if (c.properties.secretBytes) {
+    println("    secretBytes: ")
+    println("\n" + new String(c.secretBytes.getPlainData(), StandardCharsets.UTF_8))
+    println("")
+  }
+  if (c.properties.privateKeySource) {
+    println("   privateKey: " + c.getPrivateKey())
+  }
+  if (c.properties.apiToken) {
+    println("   apiToken: " + c.apiToken)
+  }
+  if (c.properties.token) {
+    println("   token: " + c.token)
+  }
+  println("")
+}
+Job-specific creds
+import java.nio.charset.StandardCharsets
+import java.io.*
+Jenkins.instance.getAllItems().each { item ->
+ if (item.class.toString().contains("Job")) {
+ def jobName = item.name.replaceAll("/", "-")
+ def file = new File("/home/jenkins/surya/" + project + "-" jobName + ".txt")
+ def writer = new FileWriter(file)
+
+
+ item.getAllCredentials().each { c ->
+ writer.write("Credential ID: " + c.id + "\n")
+ if (c.properties.description) {
+ writer.write(" Description: " + c.description + "\n")
+ }
+ if (c.properties.username) {
+ writer.write(" Username: " + c.username + "\n")
+ }
+ if (c.properties.password) {
+ writer.write(" Password: " + c.password + "\n")
+ }
+ if (c.properties.passphrase) {
+ writer.write(" Passphrase: " + c.passphrase + "\n")
+ }
+ if (c.properties.secret) {
+ writer.write(" Secret: " + c.secret + "\n")
+ }
+ if (c.properties.secretBytes) {
+ writer.write(" SecretBytes: " + new String(c.secretBytes.getPlainData(), StandardCharsets.UTF_8) + "\n")
+ }
+ if (c.properties.privateKeySource) {
+ writer.write(" PrivateKey: " + c.getPrivateKey() + "\n")
+ }
+ if (c.properties.apiToken) {
+ writer.write(" ApiToken: " + c.apiToken + "\n")
+ }
+ if (c.properties.token) {
+ writer.write(" Token: " + c.token + "\n")
+ }
+ writer.write("\n")
+ }
+ writer.close()
+ }
+}
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+[jenkins@plcislave04 scripts]$ cat cleanup_disk.sh
+#!/bin/bash
+
+
+
+set -x
+for i in $(vboxmanage list vms | awk '{print $2}' | tr -d '"');do vboxmanage unregistervm $i --delete;done
+jenkinshome='/home/jenkins'
+log_file_dir='/home/jenkins/disk_report'
+
+
+mkdir -p $log_file_dir
+
+
+
+#Below will set the maximum disk usages criteria.
+
+
+
+typeset -i Alert_Usages="55"
+
+
+
+#Below will find the disk usages percentage of user home directory,change if you want in some other dir e.g /,/home,/tmp etc
+
+
+
+DiskUsage=`df -h $jenkinshome | tail -1 |awk '{print $5}'|cut -c1-2`
+
+
+
+echo "************************* `date +"%d.%m.%Y %T"`**************** " #|tee -a "$log_file_dir/temp_file.log"
+echo " Current Disk Usage is : $DiskUsage " |tee -a "$log_file_dir/temp_file.log"
+echo " Alert value set by you : $Alert_Usages " |tee -a "$log_file_dir/temp_file.log"
+cd $jenkinshome
+
+
+
+
+if [ "$DiskUsage" -ge "$Alert_Usages" ]
+ then
+ echo "IT WORKS!"
+ echo "$PWD"
+ find $jenkinshome/workspace/* -type d -mmin +240 -exec rm -rf {} \;
+ find $jenkinshome/sharedspace/* -type d -mmin +240 -exec rm -rf {} \;
+ find /tmp/* -mmin +240 -exec rm -rf {} \; > /dev/null
+ else
+ echo " Disk Usages value is less than Alert value. " |tee -a "$log_file_dir/temp_file.log"
+fi
+
+echo " ************************* End of Log *******************************" |tee -a "$log_file_dir/temp_file.log"
+exit
+
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+[jenkins@plcislave04 scripts]$ cat rsync_jenkins_xmls.sh
+#!/bin/bash
+
+
+
+#This script will rsync all xmls found in Jenkins_Home to plcislave02
+rsync -avtrzP jenkins@plci01:/var/lib/jenkins/ --exclude '*/' --exclude '.*' --include '*.xml' ~/jenkins_xmls
+
+
+
+rsync -avtzP jenkins@plci01:/var/lib/jenkins/jobs/ --prune-empty-dirs --exclude '**/.git/*' --exclude '**/*.groovy' --exclude '**/workspace*/' --exclude '**/node_modules/*' --exclude '**/modules/*' --exclude '**/builds/*' --exclude '**/*.txt' --exclude '**/disk-usage.xml'  --exclude '**/*.log' --exclude '**/*revision-hash.xml' --include '*/' --include 'config.xml' ~/jenkins_xmls/jobs
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Retrieving Project
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+import java.nio.charset.StandardCharsets;
+
+def project = "BLP"
+def job = "credentials"
+
+def jenkinsItem = Jenkins.instance.getItem(project).getItem(job)
+def creds = com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
+      com.cloudbees.plugins.credentials.Credentials.class,
+      jenkinsItem,
+      null,
+      null
+)
+
+for (c in creds) {
+  println(c.id)
+  if (c.properties.description) {
+    println("   description: " + c.description)
+  }
+  if (c.properties.username) {
+    println("   username: " + c.username)
+  }
+  if (c.properties.password) {
+    println("   password: " + c.password)
+  }
+  if (c.properties.passphrase) {
+    println("   passphrase: " + c.passphrase)
+  }
+  if (c.properties.secret) {
+    println("   secret: " + c.secret)
+  }
+  if (c.properties.secretBytes) {
+    println("    secretBytes: ")
+    println("\n" + new String(c.secretBytes.getPlainData(), StandardCharsets.UTF_8))
+    println("")
+  }
+  if (c.properties.privateKeySource) {
+    println("   privateKey: " + c.getPrivateKey())
+  }
+  if (c.properties.apiToken) {
+    println("   apiToken: " + c.apiToken)
+  }
+  if (c.properties.token) {
+    println("   token: " + c.token)
+  }
+  println("")
+}
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Connecting to ssh servers and updating key.
+#!/bin/bash
+
+# define the list of servers in a file
+servers_file="file_servers.txt"
+
+# create a file to store the list of failed servers
+failed_file="failed_servers.txt"
+touch "$failed_file"
+
+# read the list of servers from the file and loop through them
+while read -r server; do
+echo "Connecting to $server"
+# try to SSH into the server and append "some text" to the authorized_keys file
+ssh tomcat@$server 'echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRD9EMYXj+Ess8eF4rBkrDq2YeWp0iAOLSDnoNu/ps3HpYOTnkh5uc57bluP+JvbVVDQkPQ9n6aN+gNH3Ngb3C8ib17p3vpNVZ1NfvmICrdD51UtzK0Y5Id9ccC5VTK2MKC/63knvdTQGH0RmkZtuBpjfgrX7A2Eux82RUX1Aq2o2VbeCG8W7hp1Gql4XOXhKdzoSEamt8wOkGRMJhafe9O61tFvhBKFJ97Rh9uuoD5RjiTzLdQYKtVgxmEErz0gEF2dYlalQwuIHFS38FOj8t/6eqzB/aNAUb3M2qS4idcaH1mvUJMvGoA5gTYEbvv40a7QiZ+430hG9GlVEa6h5UDQADdOLwKq9g65rWi4YPVZY5s0XXwW3oBGTQpticAHirwKm7l6PQgUMu2CzQhqAgXh4C4nmTbdsrd7njmFqYzvHCAvmbVxhIOxbgWoEtAqvcAhN62xLaSNbs0UfooqmEyRcDhtALKiAOAsIl43dCxG0i9G+X1gNcqz/5XjG4Vx8= jenkins@plci03.wil.csc.local" >> ~/.ssh/authorized_keys"
+# check the exit status of the SSH command and log the server name if it failed
+if [ $? -ne 0 ]; then
+echo "Failed to connect to $server"
+echo "$server" >> "$failed_file"
+fi
+done < "$servers_file"
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+To find out multi branch pipleine jobs
+import jenkins.model.*
+
+Jenkins.instance.getAllItems(org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject.class).each { item ->
+  println(item.fullName)
+}
