@@ -1,0 +1,152 @@
+==========================
+===========jenkins scripts====================
+
+--------------------------------------------------------------------------
+(1). -----Find the jobs which are ran 30 days old------------------
+============================================
+// Set how old the jobs to list should be (in days)
+def numDaysBack = 1
+
+
+def cutOfDate = System.currentTimeMillis() - 1000L * 60 * 60 * 24 * numDaysBack
+
+for (job in Jenkins.instance.getAllItems(Job.class)) {
+  build = job.getLastSuccessfulBuild()
+  if (build != null && build.getTimeInMillis() < cutOfDate) {
+    println job.getFullName()
+  }
+}
+
+
+==============================================
+(2). ---------------To decrypt the secrets----------------------------------
+==============================================
+println(hudson.util.Secret.fromString("{AQAAABAAAAAQ+MKD1MEo+Qd0qrbQyspCp72TbMAPi3AjhoiPpS5TFHM=}").getPlainText())
+
+Can refer below links
+https://devops.stackexchange.com/questions/2191/how-to-decrypt-jenkins-passwords-from-credentials-xml
+https://www.codurance.com/publications/2019/05/30/accessing-and-dumping-jenkins-credentials
+
+=====================================================
+
+(3). -----------------------Running builds--------------------
+=========================================
+
+runningBuilds = Jenkins.instance.getView('All').getBuilds().findAll() { it.getResult().equals(null) }
+
+
+last successfull build-- 
+def buildName = Jenkins.instance.getItem('test').lastSuccessfulBuild.displayName
+
+===========last failedbuild============
+
+def buildName = Jenkins.instance.getItem('test1').lastFailedBuild.displayName
+def buildnumber = Jenkins.instance.getItem('test1').lastFailedBuild.number
+def buildName = Jenkins.instance.getItem('test1').lastFailedBuild.displayName
+
+======================================================
+(4)----------------last build-----------
+
+import jenkins.model.Jenkins
+name = "test1"
+//If we want to add more then one job
+def items = new LinkedHashSet();
+def job = Hudson.instance.getJob(name)
+items.add(job);
+items.each { item ->
+    try {
+        def job_data = Jenkins.instance.getItemByFullName(item.fullName)
+        println 'Job: ' + item.fullName
+        if (job_data.getLastBuild()) {
+            last_job_num = job_data.getLastBuild().getNumber()
+            def upStreamBuild = Jenkins.getInstance().getItemByFullName(item.fullName).getBuildByNumber(last_job_num)
+println 'LastBuildNumer: ' + last_job_num
+            println "LastBuildTime: ${upStreamBuild.getTime()}"
+        } else {
+            println 'LastBuildNumer: Null'
+        }
+    } catch (Exception e) {
+        println ' Ignoring exception ' + e
+    }
+}
+
+
+
+------parameters-------
+
+lastCompletedBuild 56
+lastFailedBuild 56
+lastStableBuild 51
+lastSuccessfulBuild 51
+lastUnstableBuild -1
+lastUnsuccessfulBuild 56
+--------
+===================================================================
+
+
+job number date===
+
+
+import jenkins.model.Jenkins
+
+def item = Jenkins.instance.getItem("test1")
+def  f=item.getLastFailedBuild()
+
+
+println f.getTime()
+println f.getNumber()
+
+
+
+
+def  ff=item.getLastSuccessfulBuild()
+println ff.getTime().format("YYYY-MMM-dd HH:mm:ss")
+println ff.getTime().format("dd-MM-yyyy")
+
+
+result===
+Thu May 18 07:11:37 UTC 2023
+6
+2023-May-18 07:12:06
+18-05-2023
+
+==========================
+
+***************job details***********
+***********************************
+
+def jenkins = Jenkins.getInstance()
+def jobName = "test1"
+def job = jenkins.getItem(jobName)
+def item = Jenkins.instance.getItem("test1")
+def  f=item.getLastFailedBuild()
+
+
+println f.getTime()
+
+def  ff=item.getLastSuccessfulBuild()
+println ff.getTime().format("YYYY-MMM-dd HH:mm:ss")
+println ff.getTime().format("dd-MM-yyyy")
+
+println "Job type: ${job.getClass()}"
+println "Is building: ${job.isBuilding()}"
+println "Is in queue: ${job.isInQueue()}"
+println "Last successfull build: ${job.getLastSuccessfulBuild()}"
+println "Last failed build: ${job.getLastFailedBuild()}"
+println "Last build: ${job.getLastBuild()}"
+println "All builds: ${job.getBuilds().collect{ it.getNumber()}}"
+
+
+=============**********============================
+
+
+
+
+
+
+
+
+
+
+
+
